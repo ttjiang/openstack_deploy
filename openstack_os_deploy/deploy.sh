@@ -4,51 +4,31 @@ DIR="/opt/openstack"
 
 ##check cobbler puppet has been installed##
 
-sudo rpm -qa | grep cobbler
+ rpm -qa | grep cobbler
 if [ $? -ne 0 ];then
     echo "Please install cobbler.......,run install.sh"
     exit 1
 fi
 
-#sudo rpm -qa | grep puppet
-#if [ $? -ne 0 ];then
-#    echo "Please install puppet.......,run install.sh"
-#    exit 1
-#fi
-
-#sudo rpm -qa | grep facter
-#if [ $? -ne 0 ];then
-#    echo "Please install facter.......,run install.sh"
-#    exit 1
-#fi
-
-##check end##
-
-
-##read host configuration##
-
-if [ ! -f $DIR/host.template ];then
-    echo "host.template does not exist,so exit"
-    exit
+ rpm -qa | grep puppet-server
+if [ $? -ne 0 ];then
+    echo "Please install puppet-server.......,run install.sh"
+    exit 1
 fi
 
-while read line
-do
-    if [ "$line" == "" ];then
-        continue
-    fi
-    if [ "${line:0:1}" == "#" ];then
-        continue
-    fi
-    ip_addr=`echo $line|awk '{print $1}'`
-    mac_addr=`echo $line|awk '{print $2}'`
-    hostname=`echo $line|awk '{print $3}'`
-    if [ "$mac_addr" == "" ] || [ "$ip_addr" == "" ] || [ "$hostname" == "" ];then
-        echo "you must fill in host.template in right format, now exit"
-        exit
-    fi
-done  < ./host.template
+ rpm -qa | grep facter
+if [ $? -ne 0 ];then
+    echo "Please install facter.......,run install.sh"
+    exit 1
+fi
 
+rm -rf /etc/puppet/*
+cp -r $DIR/puppet/* /etc/puppet/
+
+service puppetmaster start
+chkconfig puppetmaster on 
+
+##check end##
 
 ########################################################################
 #start cobbler 
@@ -116,14 +96,17 @@ echo "------------------------------------"
 echo "2 configue /etc/cobbler/setings"
 echo
 
-cobbler_server_ip=`sed -n '/cobbler_server_ip/p' "$DIR"/openstack_deploy.conf | awk '{print $2}'`
-subnet=`sed -n '/subnet_ip/p' "$DIR"/openstack_deploy.conf | awk '{print $2}'`
-subnet_netmask=`sed -n '/subnet_netmask/p' "$DIR"/openstack_deploy.conf | awk '{print $2}'`
-range_ip_start=`sed -n '/range_ip_start/p' "$DIR"/openstack_deploy.conf | awk '{print $2}'`
-range_ip_stop=`sed -n '/range_ip_stop/p' "$DIR"/openstack_deploy.conf | awk '{print $2}'`
-gateway=`sed -n '/gateway_ip/p' "$DIR"/openstack_deploy.conf | awk '{print $2}'`
-netmask=`sed -n '/netmask_ip/p' "$DIR"/openstack_deploy.conf | awk '{print $2}'`
-dns=`sed -n '/dns_ip/p' "$DIR"/openstack_deploy.conf | awk '{print $2}'`
+cobbler_server_ip=`sed -n '/cobbler_server_ip/p' "$DIR"/os_deploy.conf | awk '{print $2}'`
+cobbler_server_name=`sed -n '/cobbler_server_name/p' "$DIR"/os_deploy.conf | awk '{print $2}'`
+subnet=`sed -n '/subnet_ip/p' "$DIR"/os_deploy.conf | awk '{print $2}'`
+subnet_netmask=`sed -n '/subnet_netmask/p' "$DIR"/os_deploy.conf | awk '{print $2}'`
+range_ip_start=`sed -n '/range_ip_start/p' "$DIR"/os_deploy.conf | awk '{print $2}'`
+range_ip_stop=`sed -n '/range_ip_stop/p' "$DIR"/os_deploy.conf | awk '{print $2}'`
+gateway=`sed -n '/gateway_ip/p' "$DIR"/os_deploy.conf | awk '{print $2}'`
+netmask=`sed -n '/netmask_ip/p' "$DIR"/os_deploy.conf | awk '{print $2}'`
+dns=`sed -n '/dns_ip/p' "$DIR"/os_deploy.conf | awk '{print $2}'`
+
+node_cc_ip=`sed -n '/node_cc_ip/p' "$DIR"/openstack_deploy.conf | awk '{print $2}'`
 
 sed -i "s/next_server:.*/next_server: $cobbler_server_ip/g" /etc/cobbler/settings
 sed -i "s/server:.*/server: $cobbler_server_ip/g" /etc/cobbler/settings
@@ -179,7 +162,8 @@ ks="ks.cfg"
 \cp -rf $DIR/$ks /var/www/
 
 sed -i "s/ftp:\/\/192\.168\.1\.1\/pub/http:\/\/$cobbler_server_ip:7112\/cobbler\/ks_mirror\/openstack_rhel-x86_64/g" /var/www/$ks
-
+sed -i "s/(@_@)/$cobbler_server_name/g" /var/www/$ks
+sed -i "s/(@-@)/$cobbler_server_ip/g" /var/www/$ks
 
 echo
 echo "---------------------------------------"
@@ -205,6 +189,10 @@ if [ ! -f $DIR/host.template ];then
     exit
 fi
 
+sed -i "/$cobbler_server_ip/d" /etc/hosts
+sed -i "/$cobbler_server_name/d" /etc/hosts
+echo "$cobbler_server_ip  $cobbler_server_name" >> /etc/hosts
+
 while read line
 do
     if [ "$line" == "" ];then
@@ -221,6 +209,11 @@ do
         exit
     fi
 
+    sed -i "/$ip_addr/d" /etc/hosts
+    sed -i "/$hostname/d" /etc/hosts
+    echo "$ip_addr  $hostname" >> /etc/hosts
+    
+
     rm -rf /var/www/$mac_addr > /dev/null 2>&1
     mkdir /var/www/$mac_addr
     cp /var/www/$ks /var/www/$mac_addr/ks.cfg
@@ -230,9 +223,36 @@ do
     sed -i "s/GATEWAY=.*/GATEWAY=$gateway/g" /var/www/$mac_addr/ks.cfg
     sed -i "s/DNS1=.*/DNS1=$dns/g" /var/www/$mac_addr/ks.cfg
     sed -i "s/127\.0\.0\.1/$cobbler_server_ip/g" /var/www/$mac_addr/ks.cfg
+    sed -i "s/myip/$ip_addr/g" /var/www/$mac_addr/ks.cfg
+    sed -i "s/myhostname/$hostname/g" /var/www/$mac_addr/ks.cfg
     echo "\$SNIPPET('kickstart_done')" >> /var/www/$mac_addr/ks.cfg
     cobbler system remove --name=$mac_addr > /dev/null 2>&1
     cobbler system add --name=$mac_addr --profile=openstack_rhel-x86_64 --mac=$mac_addr --static=yes --ip-address=$ip_addr --kickstart=/var/www/$mac_addr/ks.cfg --hostname=$hostname --netboot-enabled=true
+
+    mkdir -p /etc/puppet/files/$hostname
+    rm -rf /etc/puppet/files/$hostname/*
+    cp /etc/puppet/files/local.conf /etc/puppet/files/$hostname/
+    sed -i "s/SERVER_YUM_IP.*/SERVER_YUM_IP $cobbler_server_ip/g" /etc/puppet/files/$hostname/local.conf
+    sed -i "s/MY_HOST_IP.*/MY_HOST_IP $ip_addr/g" /etc/puppet/files/$hostname/local.conf
+    sed -i "s/MY_HOST_NAME.*/MY_HOST_NAME $hostname/g" /etc/puppet/files/$hostname/local.conf
+    sed -i "s/CC_HOST_IP.*/CC_HOST_IP $node_cc_ip/g" /etc/puppet/files/$hostname/local.conf
+    if [ "$node_cc_ip" == "$ip_addr" ];then
+        sed -i "s/NODE_TYPE.*/NODE_TYPE cc/g" /etc/puppet/files/$hostname/local.conf  
+    fi
+
+    echo "
+node '$hostname' {
+  file{ \"/opt/openstack/local.conf\":
+                ensure => present,
+                alias => \"local.conf\",
+                source => \"puppet:///files/$hostname/local.conf\",
+                owner => root,
+                group => root,
+                mode => 644;
+  }
+  include deploy
+}
+    " >> /etc/puppet/manifests/nodes.pp    
 
 done  < ./host.template
 
@@ -263,4 +283,7 @@ if [ $? -ne 0 ];then
     echo 
     exit
 fi
+
+service ntpd start
+chkconfig ntpd on
 

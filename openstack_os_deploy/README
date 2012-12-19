@@ -1,0 +1,3 @@
+1 run install.sh first
+2 configure os_deploy.sh and host.template
+3 run deploy.sh

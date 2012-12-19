@@ -33,6 +33,8 @@ echo "enabled=1" >> /etc/yum.repos.d/openstack.repo
 
 echo "gpgcheck=0" >> /etc/yum.repos.d/openstack.repo
 
-yum install dhcp tftp-server syslinux cobbler -y
+yum install dhcp tftp-server syslinux cobbler puppet-server -y
+
+
 
 
